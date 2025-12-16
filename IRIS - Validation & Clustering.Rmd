@@ -1,0 +1,271 @@
+---
+title: "Validation & Clustering"
+author: "Anand Kramer"
+date: "2025-09-03"
+output: 
+  html_document:
+    highlight: tango
+    toc: true
+    number_sections: false
+    self_contained: true
+    css: styles.css
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE)
+```
+
+## Question 3.1.a
+<b style ="color:blue">Methodology:</b> In this example we use a LOOCV setup and iterate from 1 to 30 k neighbors to determine the accuracy compared to k neighbors of the model using kknn. The goal is to determine what value of k that renders the highest accuracy that will be seen in the results. Note: I was unable to install the library caret into R due to technical difficulties so I was unable to set a value for k-folds. Reluctantly I ended up using LOOCV which is n-1 folds. Below are the steps taken to render the results. 
+
+```{r load-packages-data}
+# Load Packages
+library(kernlab)
+library(kknn)
+
+df <- read.table("C:\\Users\\Anand\...\credit_card_data.txt", header = FALSE)
+
+head(df)
+tail(df)
+summary(df)
+
+# for reproducibility
+set.seed(123)
+
+# max k value to evaluate
+kmax <- 30
+
+# set the target column
+colnames(df)[ncol(df)] <- "Response"
+df$Response <- as.factor(df$Response)
+```
+
+### LOOCV with KNN
+
+```{r kknn-cv, echo = TRUE}
+# LOOCV with kknn (as default)
+cv_model <- train.kknn(Response~., data = df, kmax = kmax, scale = TRUE, kernel = "rectangular")
+
+# store accuracy values for each k
+cv_kknn_results <- data.frame(
+  k = 1:kmax,
+  Accuracy = sapply(1:kmax, function(k) {
+    mean(fitted(cv_model)[[k]] == df$Response)*100
+  })
+)
+```
+
+<b style ="color:blue">Results:</b> Below are the results of the model.
+
+```{r results-cv}
+# Print results
+print(cv_kknn_results)
+best_k <- cv_kknn_results$k[which.max(cv_kknn_results$Accuracy)]
+best_accuracy <- max(cv_kknn_results$Accuracy)
+```
+
+### Plot Accuracy vs. k Neighbors
+```{r plot-accuracy, echo = FALSE}
+# plot accuracy vs. k
+plot(cv_kknn_results$k, cv_kknn_results$Accuracy, type = "b", pch = 19, col = "blue",
+     xlab = "Number of Neighbors (k)",
+     ylab = "Cross-Validation Accuracy",
+     main = "LOOCV Accuracy for kkNN")
+abline(v = best_k, col="red", lty = "dashed")
+abline(h = best_accuracy, col="red", lty = "dashed")
+```
+
+Obtained from the following code:
+```{r, echo = TRUE, eval = FALSE}
+# plot accuracy vs. k
+# source: https://statisticsglobe.com/abline-function-in-r/
+plot(cv_kknn_results$k, cv_kknn_results$Accuracy, type = "b", pch = 19, col = "blue",
+     xlab = "Number of Neighbors (k)",
+     ylab = "Cross-Validation Accuracy (%)",
+     main = "LOOCV Accuracy for kkNN")
+abline(v = best_k, col="red", lty = "dashed")
+abline(h = best_accuracy, col="red", lty = "dashed")
+```
+
+<b style ="color:blue">Results Discussion:</b> From the LOOCV, we observe that the highest accuracy is achieved at k = 22 neighbors with an accuracy of 85.32%. The LOOCV is a robust choice that reduces bias compared to a single split (70/30) that explored k values fairly. The results indicate that the model benefited from reducing noise/variance rather than local fluctuations since a higher k value rendered the best result. The rather large neighborhood shows that the decision boundary is less complex and a good generalization which is useful if we test against new data. In this case, the accuracy is a good measure. However, we could also adjust distance and the kernels to potentially improve accuracy.
+
+
+
+## Question 3.1.b
+<b style ="color:blue">Methodology:</b> In this example we adjust and split the data into training, validation, and test data sets and iterate from 1 to 30 k neighbors to determine the accuracy compared to k neighbors of the model using kknn. The goal is to determine what value of k that renders the highest accuracy that will be seen in the results. We continue with the kknn so that we can compare the results against the LOOCV method. Below are the steps taken to render the results. The initial steps to load data, set the response, and maximum k values, are the same as before. The adjustment is made in splitting of the data for training, testing, and validation
+
+
+### Split into train (70%), validation (15%), test (15%)
+
+```{r kknn-cv-split, echo = TRUE}
+# Split into train (70%), validation (15%), test (15%)
+n <- nrow(df)
+train_df <- sample(1:n, size = 0.7*n)
+remaining_df <- setdiff(1:n, train_df)
+valid_df <- sample(remaining_df, size = 0.5*length(remaining_df))
+test_df <- setdiff(remaining_df, valid_df)
+
+# set the data index
+train_df <- df[train_df,]
+valid_df <- df[valid_df,]
+test_df <- df[test_df,]
+
+
+# store accuracy values for each k from split method
+split_kknn_results <- data.frame(
+  k = 1:kmax,
+  Accuracy = sapply(1:kmax, function(k) {
+    split_model <- kknn(Response~., train_df, valid_df, k=k, kernel = "rectangular")
+    mean(fitted(split_model) == valid_df$Response)*100
+  })
+)
+
+# pick best k from validation
+best_k <- split_kknn_results$k[which.max(split_kknn_results$Accuracy)]
+```
+
+### Test Validation
+```{r test}
+# train best model on train and validation 
+# source: https://www.rdocumentation.org/packages/kknn/versions/1.4.0/topics/kknn
+train_final <-rbind(train_df, valid_df)
+final_model <- kknn(Response~., train_final, test_df, k=best_k, kernel = "rectangular")
+test_accuracy <- mean(fitted(final_model)== test_df$Response)*100
+```
+
+<b style ="color:blue">Results:</b> Below are the results of the model.
+```{r results-split}
+# Print results
+cat("Best k =", best_k, "%\n")
+cat("Validation Accuracy =", round(max(split_kknn_results$Accuracy),2),"%\n")
+cat("Test Accuracy =", round(test_accuracy,2), "%\n")
+```
+
+### Plot Accuracy vs. k Neighbors
+```{r plot, echo = FALSE}
+# plot accuracy vs. k
+plot(split_kknn_results$k, split_kknn_results$Accuracy, type = "b", pch = 19, col = "blue",
+     xlab = "Number of Neighbors (k)",
+     ylab = "Validation Accuracy (%)",
+     main = "Split Test Validation Accuracy for kkNN")
+abline(v = best_k, col = "red", lty =2)
+```
+
+Obtained from the following code:
+```{r, echo = TRUE, eval = FALSE}
+# plot accuracy vs. k
+plot(split_kknn_results$k, split_kknn_results$Accuracy, type = "b", pch = 19, col = "blue",
+        xlab = "Number of Neighbors (k)",
+     ylab = "Validation Accuracy (%)",
+     main = "Split Test Validation Accuracy for kkNN")
+abline(v = best_k, col = "red", lty =2)
+```
+
+<b style ="color:blue">Results Discussion:</b> From the split validation kknn method we observe that the highest accuracy is achieved at k = 3 neighbors with an accuracy of 88.78%. However, the test accuracy was only 80.81% which shows some variability due to the random split. The test accuracy is a better measure of generalization since there is a significant decrease in accuracy between the two results. Comparing the two methods from part a and b, cross validation suggested k = 22 while split method suggested k = 3. LOOCV averages across n-1 partitions, producing a smoother decision boundary and lower variance, whereas the single split method is more sensitive to local variations in the data. Overall, LOOCV provides a more reliable estimate of the model's performance on unseen data for this dataset. 
+
+## Question 4.1
+
+<b style ="color:blue">Situation: Customer Segmentation</b>
+At work we group customers by their purchase habits (predictors) such as frequency of purchases, purchase price, volume of products, and contract terms. We group them into clusters (response) in terms of priority: "High", "Intermediate", "Low". This becomes important when we face any time where we are not able to meet customer demand to help shape who we satisfy. 
+
+
+
+## Question 4.2
+<b style ="color:blue">Methodology:</b> In this example we use kmeans to cluster the points as well as possible. We determine the elbow point (suggested value of k) and best combination of predictors to determine the optimal clustering to predict the flower type. Below are the steps taken to render the results. 
+
+### Load Data
+```{r load-data}
+library(cluster)
+# Load iris data
+data("iris")
+df <- iris[,1:4]
+labels <- iris$Species
+
+head(iris)
+summary(iris)
+
+```
+
+### Find The Elbow for k 
+```{r elbow}
+# source: https://uc-r.github.io/kmeans_clustering
+sil_width <- sapply(2:10, function(k){
+  km <- kmeans(df, centers = k, nstart = 20)
+  ss <- silhouette(km$cluster, dist(df))
+  mean(ss[,3])
+})
+
+# identify k to use
+elbow_k <- which.max(sil_width) + 1
+cat("Suggested number of clusters (elbow method):", elbow_k, "\n")
+plot(2:10, sil_width, type="b", pch = 19, frame = FALSE,
+     xlab="Number of Clusters (k)", 
+     ylab = "Total Within-Cluster Sum of Squares (WSS)",
+     main = "Elbow Method for optimal k"
+)
+```
+
+### Try k = 2, 3, 4 vs. Accuracy
+```{r kvals}
+k_vals <- 2:4
+acc_k <- numeric(length(k_vals))
+
+for(i in seq_along(k_vals)) {
+  k <- k_vals[i]
+  km <- kmeans(df, centers = k, nstart= 20)
+  cm <- table(labels, km$cluster)
+  acc_k[i] <- sum(apply(cm, 2, max))/sum(cm)
+  cat("k =", k, "Accuracy vs true labels:", round(acc_k[i]*100,2), "\n")
+}
+
+best_k <- k_vals[which.max(acc_k)]
+cat("Selected k for clustering based on highest accuracy:", best_k, "\n")
+```
+
+### Evaluate Clustering to True Species
+```{r evaluate}
+library(gtools)
+
+predictors <- colnames(df)
+results <-data.frame(Predictors = character(), Accuracy = numeric(), stringsAsFactors = FALSE)
+
+# iterate through combo of 2 or more predictors
+for (i in 2:length(predictors)) {
+  combs <-combinations(length(predictors),i, predictors)
+  for (j in 1:nrow(combs)) {
+    vars <- combs[j,]
+    sub_df <- df[,vars]
+    
+    # k means with number of clusters suggested by elbow
+    km <- kmeans(sub_df, centers = best_k, nstart = 20)
+    
+    cm <- table(labels, km$cluster)
+    acc <- sum(apply(cm, 2, max))/sum(cm)
+   
+    # store results
+    results <- rbind(results, data.frame(Predictors = paste(vars, collapse=","), Accuracy = round((acc*100),2)))
+  }
+}
+
+# sort results
+results <- results[order(-results$Accuracy),]
+head(results, 10)
+
+```
+<b style ="color:blue">Results:</b> Below are the results of the model.
+
+```{r best-iris, echo = FALSE}
+best_combo <- results[1,]
+cat("Best predictors:", best_combo$Predictors, "\n")
+cat("Suggested number of clusters (elbow method):", best_k, "\n")
+cat("Accuracy:", round(best_combo$Accuracy, 2), "\n")
+```
+Obtained from the following code:
+```{r, echo = TRUE, eval = FALSE}
+best_combo <- results[1,]
+cat("Best predictors:", best_combo$Predictors, "\n")
+cat("Suggested number of clusters (elbow method):", best_k, "\n")
+cat("Accuracy:", round(best_combo$Accuracy, 2), "\n")
+```
+
+<b style ="color:blue">Results Discussion:</b> Utilizing the k-means clustering method on the Iris dataset, we found that setting k to 3 and using only the petal length and petal width as predictors resulted in a clustering accuracy of 96%. Adding other combinations of predictors either decreased the accuracy or did not improve predictions, suggesting that petal measurements provide the most information for distinguishing species.  Both the silhouette method and elbow method supported k = 3, which aligns with the actual number of species (3) in the dataset.  The high accuracy demonstrates that the minimal set of informative variables can yield optimal clustering. Overall, this analysis shows that even with an unsupervised method like k-means, identifying the most informative features is key to achieving accurate and meaningful clusters. 
