@@ -1,0 +1,93 @@
+---
+title: "HW5"
+author: "The Real Slim Shady"
+date: "2025-09-15"
+output: 
+  html_document:
+    highlight: tango
+    toc: true
+    number_sections: false
+    self_contained: true
+    css: styles.css
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE)
+```
+
+# Question 8.1
+
+<b style ="color:blue">Situation: Linear Regression</b> A situation in which a linear regression model is predicting the outcome of a score on an exam in school. Predictors would consist of hours of studying, hours of sleep, hours of studying for other classes, eating healthy to stimulate the brain, amount of coffee before an exam. All of these could help predict the outcome of a score with some having more weight than others. 
+
+
+# Question 8.2
+## <b style ="color:blue">Methodology:</b> 
+US crime data and regression with the functions lm and glm are used to predict the observed crime rate in a city.  The lm function fits a linear relationship between predictors and a response using ordinary least squares. The glm function allows us to specify the distribution fo the response and how predictors relate to response (link function). The following data is utilized for testing: 
+
+- M = 14.0 
+- So = 0 
+- Ed = 10.0 
+- Po1 = 12.0 
+- Po2 = 15.5 
+- LF = 0.640 
+- M.F = 94.0 
+- Pop = 150 
+- NW = 1.1 
+- U1 = 0.120 
+- U2 = 3.6 
+- Wealth = 3200 
+- Ineq = 20.1 
+- Prob = 0.04 
+- Time = 39.0
+
+### Load Data
+```{r load-data}
+rm(list=ls())
+set.seed(123)
+# prepare data
+
+# load crime data
+df <- read.table("uscrime.txt", header = TRUE)
+
+head(df)
+
+
+```
+
+### Linear Regression Smoothing Exploration
+```{r Linear Method}
+# linear regression model
+fit <- lm(Crime ~., data = df)
+
+```
+### Generalized Linear Regression Smoothing Exploration
+```{r Genarl Method}
+# linear regression model
+fit_glm <- lm(Crime ~., data = df, family = gaussian(link = "identity"))
+
+```
+## <b style ="color:blue">Results:</b> 
+The results of the lm and glm functions are as follows: 
+
+```{r lm Results}
+# model summary
+summary(fit)
+summary(fit_glm)
+```
+
+## <b style ="color:blue">Results Discussion:</b>
+
+Using the lm or glm function (with Gaussian/identity setup) for regression produces the same coefficients and statistics because for a continous linear response, glm reduces to ordinary least squares. As such, the significant predictors based on p values are:
+
+-  Intercept: (p < 0.001)
+-  M: percentage of males aged 14–24 in total state population (p ≈ 0.04)
+-  Ed: mean years of schooling of the population aged 25 years or over (p ≈ 0.005)
+-  Ineq: income inequality: percentage of families earning below half the median income (p ≈ 0.004)
+-  Prob: probability of imprisonment: ratio of number of commitments to number of offenses (p ≈ 0.041)
+
+It is good to note that the following predictors are marginally significant due to their p-values being close to 0.05:
+
+-  Po1.: per capita expenditure on police protection in 1960 (p ≈ 0.079)
+-  U2: unemployment rate of urban males 35–39 (p ≈ 0.05)
+
+As a result, residual standard error shows that the typical prediction varies by 209 crimes (plus or minus). Multiple R^2 is 0.803 so approximately 80% of the variation in crime rates are explained with the model. An adjusted R^2 of 0.708 penalizes for having a large number of predictors. The drop from 80% to 71% between the two measures shows that the model is overfitting. The model overall is statistically significant with a p-value less than 0.001. 
