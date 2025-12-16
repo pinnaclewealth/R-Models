@@ -1,0 +1,306 @@
+---
+title: "Data Preparation"
+author: "Anand Kramer"
+date: "2025-09-05"
+output: 
+  html_document:
+    highlight: tango
+    toc: true
+    number_sections: false
+    self_contained: true
+    css: styles.css
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE)
+```
+
+## Question 5.1
+<b style ="color:blue">Methodology:</b> In this problem we use US crime data provided to determine whether there are any outliers in the last column using grubbs.test function in the outliers package in R. 
+
+
+```{r load-packages-data}
+# Clear the environment
+rm(list=ls())
+
+# install Libraries
+if (!require(outliers)) {
+  chooseCRANmirror(graphics=FALSE, ind =1)
+  install.packages("outliers")
+}
+
+library(outliers)
+
+# Set seed for reproducibility.
+set.seed(123)
+
+df <- read.table("data 5.1//uscrime.txt", header = TRUE)
+
+head(df)
+tail(df)
+summary(df)
+
+# for reproducibility
+set.seed(123)
+
+```
+
+### Identify the last column and run Grubbs Test
+
+```{r last column, echo = TRUE}
+# identify last column
+crime_rate <- df[,ncol(df)]
+crime_rate
+
+```
+
+<b style ="color:blue">Results:</b> Below are the results of the model.
+
+```{r results-grubbs, echo = FALSE}
+# run Grubbs' test
+grubbs.test(crime_rate)
+grubbs.test(crime_rate, type = 10)
+
+```
+
+<b style ="color:blue">Results Discussion:</b> In the one sided test for the maximum  value at 1993, we observe that G has a value of 2.81 standard devaiations away from the mean. However, p-value is 0.079 which is not significant to make 1993 an outlier as it falls outside of alpha = 0.05 so we cannot reject the null hypothesis.  When considering the two sided test for the minimum and the maximum, we have a p-value of 1 which is not significant to identify 342 and 1993 as outliers using the Grubbs test. 
+
+
+
+## Question 6.1
+
+<b style ="color:blue">Situation: Change Detection</b> At work we load plastic pellets in bags into trucks. Each truck should carry 25,000 kg while a normal random variation from flow control and scale noise gives a deviation of 120 kg from baseline. There are systematic shifts that occur from feeder drift, scale miscalibration that are greater than 1% which equates to around 250 kg which matter since too many underloads trigger customer claims; overloading can violate road limits. We could run two one-sided CUSUMs to catch both overload and underload shifts. Baseline mean is 25,000 kg, detectable shift (target) delta is 250 kg, reference value (k) is delta/2 which is 125 kg and the threshold we could set to four times sigma (4*120 kg) for the threshold. For truck t with measured mass X(t): overloads identified by C(t)+ = max{0, C(t-1) + (x(t)- mu - k)} and C(t)- = max{0, C(t-1) + (x(t)- mu + k)}. WHen C(t)+ >h (overload), C(t)- < -h (underload). 
+
+
+
+## Question 6.2.1
+<b style ="color:blue">Methodology:</b> The CUSUM approach is used to identify when unofficial summer ends (i.e., when the weather starts cooling off) each year Using July through October daily-high-temperature data for Atlanta for 1996 through 2015. 
+
+### Load Data
+```{r load-data}
+
+# load high temperature data
+temps <- read.table("data 6.2//temps.txt", header = TRUE)
+temps$DAY <- as.Date(paste0("2000-", temps$DAY), format="%Y-%d-%b")
+summary(temps)
+head(temps)
+tail(temps)
+
+# check for missing values
+sum(is.na(temps))
+
+
+# find the average for each day and add it to the existing data
+temps$Average <- rowMeans(temps[,-1])
+
+head(temps)
+
+
+```
+
+### Find T, Establish C, and Find Statistics for CUSUM
+```{r CUSUM}
+
+# store cusum statistic each day of deviations from target
+temps[,"Stat"] <- NA
+
+# calculate standard deviation
+std <- sd(temps[,"Average"])
+std
+
+#set the slack to 1 standard deviation
+C <- std
+
+# calculate mean of the average
+mu0 <- mean(temps[,"Average"])
+mu0
+
+# set threshold to 5 standard deviations for change detection trigger with less false alarms
+T <- 5*std
+T
+
+# start cusum statistic at 0 since we start on the first day
+temps[1,"Stat"]<- 0
+
+# Find the number of deviations and update Cusum Statistic column
+for (i in 2:nrow(temps)) {
+  temps[i,"Stat"] <- max(0, (temps[i-1,"Stat"]+ mu0 - temps[i,"Average"] - C))
+}
+
+
+# identify when summer officially ends
+summer_end <- which(temps$Stat > T)
+
+if(length(summer_end) > 0) {
+  day_of_shift <- temps$DAY[summer_end[1]]
+  cat("The end of summer is: ", format(day_of_shift, "%b-%d"), "\n")
+} else {
+  day_of_shift <- NA
+  cat("Summer never ends.\n")
+}
+```
+
+<b style ="color:blue">Results:</b> The unofficial end of summer is October 19 according to CUSUM method above. 
+
+```{r plot CUSUM}
+
+library(ggplot2)
+
+p <- ggplot(temps, aes(x=DAY)) +
+  geom_line(aes(y=Average, color="Average Temp"), linewidth=1.2) + 
+  geom_line(aes(y=Stat, color="CUSUM Stat"), linewidth=1.2) +
+  geom_hline(aes(yintercept=mu0, color="Mean Temp"), linetype="solid") + 
+  geom_hline(aes(yintercept=T, color="CUSUM Threshold"), linetype="longdash") +
+  geom_vline(aes(xintercept = day_of_shift, color="End Of Summer"), linetype="dashed") +
+  
+  annotate("text", x=min(temps$DAY), y=mu0, vjust=1.5, hjust=0,
+           label=paste0("Mean = ", round(mu0,2)),color="red") +
+  annotate("text", x=min(temps$DAY), y=T, vjust=-1, hjust=0,
+           label=paste0("Threshold = ", round(T,2)),color="darkred") +
+  annotate("text", x=day_of_shift, y=max(temps$Average), vjust= 1.5, hjust = 2.1, angle=90,
+           label=paste0("End of Summer: ", format(day_of_shift, "%b-%d")), color="darkgreen") +
+  
+  scale_color_manual(
+    name="Legend",
+    values= c(
+      "Average Temp" = "blue",
+      "CUSUM Stat" = "orange",
+      "Mean Temp" = "red",
+      "CUSUM Threshold" = "darkred",
+      "End of Summer" = "darkgreen"
+    )
+  ) +
+  scale_x_date(date_labels="%b-%d") +
+  labs(title = "Daily Avg. Temp & CUSUM End-of-Summer Detection",
+  x="Date", y="Temperature (F)")
+p
+
+```
+
+<b style ="color:blue">Results Discussion:</b> The CUSUM method detected a persistent drop in daily high average temperatures after Oct 19 which suggests that this is when fall conditions start to present themselves. The target mean was 83.33 (degrees F) with a slack (C) of 6.7 allowing deviations smaller than ~7 degrees F are treated as "noise" so that random cool days won't trigger summer's end. Further more with T =~33.5 degrees F  that leaves about 5 days (5*6.7) of cooling before the shift in season. Based on the historical data, by mid October, Atlanta's daily temperature had consistently fallen below the 83 degrees F summer average long enough to break the CUSUM threshold.   
+
+## Question 6.2.2
+
+<b style ="color:blue">Methodology:</b> The CUSUM approach is used to identify when unofficial summer ends (i.e., when the weather starts cooling off) each year Using July through October daily-high-temperature data for Atlanta for 1996 through 2015. Then we do a second CUSUM with the table using the year and summer ending date identified to detect a year when summers are getting longer in Atlanta. 
+
+```{r load cusum}
+
+# prepare data
+library(tidyr)
+library(dplyr)
+library(lubridate)
+
+
+#remove X from year columns
+colnames(temps)[-1] <- sub("^X", "", colnames(temps)[-1])
+colnames(temps)
+str(temps)
+
+# convert from wide to long 
+temps_long <- temps %>%
+  pivot_longer(cols = -c(DAY, Average, Stat), names_to = "Year", values_to = "Temp") %>%
+  mutate(
+    Year = as.integer(Year),
+    Temp = as.numeric(Temp),
+    Date = make_date( year = Year, month = month(DAY), day = day(DAY)
+                    )
+        )
+
+unique(temps_long$Year)
+
+temps_long
+
+
+```
+### Detect End of Summer per Year with C and T
+```{r cusum1}
+# Detect summer each per year with C and T
+detect_summer_end <- function(df) {
+  
+  df$Temp <- as.numeric(df$Temp)
+  # set parameters
+  mu0 <- mean(df$Temp, na.rm=TRUE)
+  std <-sd(df$Temp, na.rm=TRUE)
+  C <- std
+  T <- 5*std
+  
+  #initialize statistic
+  df$Stat <- numeric(nrow(df))
+  df$Stat[1] <- 0
+  
+  for (i in 2:nrow(df)) {
+    df$Stat[i] <- max(0,df$Stat[i-1] + mu0 - df$Temp[i] - C)
+  }
+  
+
+  # find first shift per year
+  summer_end <- which(df$Stat > T)[1]
+  
+  SummerEnd <- if (!is.na(summer_end)) df$Date[summer_end] else as.Date(NA)
+  tibble(Year = unique(df$Year), SummerEnd = SummerEnd)
+
+}
+
+# apply function to each year
+
+summer_ends <- temps_long %>%
+  group_by(Year) %>%
+  group_modify( ~ detect_summer_end(.x)) %>%
+  ungroup()
+
+summer_ends$Year <- as.numeric(summer_ends$Year)
+summer_ends$SummerEnd <- as.Date(summer_ends$SummerEnd)
+
+summer_ends <- summer_ends %>%
+  mutate(SummerEndMD = as.Date(paste0("2000-", month(SummerEnd), "-", day(SummerEnd))))
+
+# check if summer end was detected
+table(is.na(summer_ends$SummerEnd))
+head(summer_ends, 10)
+
+missing_years <- summer_ends %>%
+  filter(is.na(SummerEnd))
+
+missing_years
+```
+
+### Detect CUSUM of Sumer End over the Years with C and T
+```{r cusum2}
+summer_ends$DOY <- sapply(summer_ends$SummerEndMD, yday)
+
+
+mu0 <- mean(summer_ends$DOY)
+mu0
+std <- sd(summer_ends$DOY)
+std
+C <- 3
+T <- 4*C
+T
+
+summer_ends$CUSUM <- numeric(nrow(summer_ends))
+summer_ends$CUSUM[1] <- 0
+
+for (i in 2:nrow(summer_ends)) {
+  summer_ends$CUSUM[i] <- max(0, summer_ends$CUSUM[i-1] + 
+                                (summer_ends$DOY[i] - mu0) - C)
+  
+}
+
+shift_index <- which(summer_ends$CUSUM >T)[1]
+shift_year <- if(!is.na(shift_index)) summer_ends$Year[shift_index] else NA
+shift_year
+```
+<b style ="color:blue">Results:</b> Below we can see the overall trend of summer end across the years using CUSUM initially. Further more, using CUSUM again across the new data, we see that if we select the slack to be 3, with a T of 12 days we observe that in 2015 the summer becomes significantly warmer as the average was 293.7 days into the year (mid-October). 
+
+```{r summer_end-trend}
+# plot trend over time
+ggplot(summer_ends, aes(x=Year, y=SummerEndMD)) +
+  geom_point(color="blue", size = 3) +
+  geom_line(color="blue") +
+  scale_y_date(date_labels = "%b-%d") + 
+  labs(title="Trend in End-of-Summer Dates (CUSUM, Atlanta)", 
+       x = "Year", y = "End of Summer Date") +
+  theme_minimal()
+```
+
+<b style ="color:blue">Results Discussion:</b> In the plot above we observe visually that the general trend from 1996 to 2015 that the summer has been getting longer. We do observe a large dip in 2010 and according to Wikipedia and climate.gov, there was a historical extra tropical cyclone (La Nina) that impacted the Gulf Cost with an atmospheric swap giving southern locations an unusually harsh winter. Using the first CUSUM, we observe that the mean of summer end historically is Oct 20-21. In the second iteration of CUSUM, a slack of 3 days and the threshold of 12 days, triggers the final year - 2015 to breach the threshold. The general trend in the chart and the threshold being reached, supports that the summer lengthened in that year relative to the 20-year baseline. 
