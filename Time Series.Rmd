@@ -1,0 +1,216 @@
+---
+title: "Time Series"
+author: "Anand Kramer"
+date: "2025-09-11"
+output: 
+  html_document:
+    highlight: tango
+    toc: true
+    number_sections: false
+    self_contained: true
+    css: styles.css
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE)
+```
+
+# Question 7.1
+
+<b style ="color:blue">Situation: Change Detection</b> I live in a very hot city in Texas. If I wanted to track daily high temperatures which shift gradually but can fluctuate slightly from day to day, exponential smoothing would be useful in predicting the weather in my city. I would need historical daily high temperature readings and since the weather here changes more gradually, then alpha should be closer to 0, so the forecast smooths out daily fluctuations. 
+
+
+# Question 7.2
+## <b style ="color:blue">Methodology:</b> 
+Daily high temperature data for Atlanta for 1996 through 2015 for each year Using July through October were analyzed to estimate the "unofficial" end of summer. The raw data was reshaped from wide to long format and converted into a consistend date format. To explore, we applied exponential smoothing methods: 
+1. Simple ES - smooths data using a level component only. 
+2. Double ES (Holt's linear trend) - smooths with a level and trend component. 
+3. Triple ES (Holt-Winters) - smooths with level, trend, and seasonal components.
+
+Fitted values were extracted and compared visually and via mean squared error to determine which method captured the temperature patterns. Then the changepoint detection method utilizing the PELT algorithm on the smoothed daily temperatures to collect data on significant temperature drops for the second half of the year to avoid false fluctuations earlier in the summer. The data collected with the changepoint detection method was plotted to visualize trends in the end of summer across the 20 year period. 
+
+### Load Data
+```{r load-data}
+rm(list=ls())
+set.seed(123)
+# prepare data
+library(tidyr)
+library(dplyr)
+options(repos = c(CRAN = "https://cloud.r-project.org"))
+install.packages("changepoint")
+library(changepoint)
+library(lubridate)
+library(ggplot2)
+
+# load high temperature data
+temps <- read.table("temps.txt", header = TRUE)
+
+#remove X from year columns
+colnames(temps)[-1] <- sub("^X", "", colnames(temps)[-1])
+
+# convert Day to a reference Date 
+temps <- temps%>%
+  mutate(Date_ref = as.Date(paste0("2000-", DAY), format="%Y-%d-%b"))
+head(temps)
+
+# convert from wide to long 
+temps_long <- temps %>%
+  pivot_longer(cols = -c(DAY, Date_ref), names_to = "Year", values_to = "Temp") %>%
+  mutate(
+    Year = as.integer(Year),
+    Temp = as.numeric(Temp),
+    Date = as.Date(paste0(Year, "-",format(Date_ref, "%m-%d")))
+  ) %>% 
+
+arrange(Year, Date)
+head(temps_long)
+
+
+```
+
+### Exponential Smoothing Exploration
+```{r ES Method}
+
+# Exponential Smoothing Exploration
+temps_avg <- temps_long %>%
+  group_by(Date) %>%
+             summarise(AvgTemp = mean(Temp, na.rm = TRUE)) %>%
+             arrange(Date)
+# time series object
+temps_ts <- ts(temps_avg$AvgTemp, start = 1996, frequency = 123)
+
+# Simple ES
+temps_single <- HoltWinters(temps_ts, beta = FALSE, gamma = FALSE)
+
+# Double ES
+temps_double <- HoltWinters(temps_ts, gamma = FALSE)
+
+# Triple ES
+temps_triple <- HoltWinters(temps_ts, seasonal = "additive")
+
+# compare ES versions
+temps_single
+temps_double
+temps_triple
+
+
+# Extract fitted values
+fitted_single <- temps_single$fitted[,1]
+fitted_double <- temps_double$fitted[,1]
+fitted_triple <- temps_triple$fitted[,1]
+
+# build dataframe
+plot_df <- data.frame(
+  Date = temps_avg$Date,
+  Observed = temps_avg$AvgTemp,
+  Single = c(rep(NA, nrow(temps_avg) - length(fitted_single)), fitted_single),
+  Double = c(rep(NA, nrow(temps_avg) - length(fitted_double)), fitted_double),
+  Triple = c(rep(NA, nrow(temps_avg) - length(fitted_triple)), fitted_triple)
+)
+
+# plot 
+plot_df_long <- plot_df %>%
+  pivot_longer(cols = c(Observed, Single, Double, Triple),
+                      names_to = "Method", values_to = "Fitted") %>%
+  mutate(Method = recode(Method,
+      Observed = "Observed", 
+      Single = "Single ES",
+      Double = "Double ES",
+      Triple = "Triple ES"
+  ))
+colnames(plot_df_long)
+
+
+ggplot(plot_df_long, aes(x = Date, y = Fitted, color = Method)) +
+  geom_line(size = 1) +
+  facet_wrap(~Method, ncol = 1, scales = "free_y") +
+  labs(title = "Observed vs. Exponential Smoothing Fits",
+       subtitle = "Stacked by Method & Observed",
+       x = "Date", y = "Temperature (F)") +
+  theme_minimal() +
+  theme(legend.position ="none")
+
+# goodness of fit test
+fitted_single_full <- plot_df$Single
+fitted_double_full <- plot_df$Double
+fitted_triple_full <- plot_df$Triple
+
+mse_single <- mean((temps_avg$AvgTemp - fitted_single_full)^2, na.rm = TRUE)
+mse_double <- mean((temps_avg$AvgTemp - fitted_double_full)^2, na.rm = TRUE)
+mse_triple <- mean((temps_avg$AvgTemp - fitted_triple_full)^2, na.rm = TRUE)
+
+mse_single
+mse_double
+mse_triple
+```
+
+### Holt-Winters exponential smoothing without trend and without seasonal component.
+
+```{r ES Single}
+
+# Determine end of summer
+summer_end <- function(temps_long, temp_col = "Temp", date_col= "Date") {
+  years <- sort(unique(temps_long$Year))
+  results <- data.frame(Year = integer(), EndOfSummer = as.Date(character()))
+  for (yr in years) {
+    subset_yr <- temps_long %>% filter(Year == yr)
+    
+  # Holt-Winter smoothing
+    # convert numeric vector of daily high temperatures for a year into time-series
+    y_ts <- ts(subset_yr[[temp_col]], frequency = 1)
+    # alpha is default optimally, beta is no trend component, gamma is no seasonality
+    hw <- HoltWinters(y_ts, beta = FALSE, gamma = FALSE)
+    smoothed <- hw$fitted[,1]
+    
+    # identify second half of data to prevent false fluctuation reading earlier in year
+    n <- length(smoothed)
+    start_idx <- ceiling(n*0.5)
+    smoothed_search <- smoothed[start_idx:n]
+    search_dates <- subset_yr[[date_col]][start_idx:n]
+    
+    # Change-Point Detection
+    cpt <- tryCatch( {
+      cpt.mean(smoothed_search, method = "PELT", penalty = "BIC")
+    }, error = function(e) NULL)
+    
+    if (!is.null(cpt)) {
+      cp_idx <- cpts(cpt)[1]
+      end_date <- search_dates[cp_idx]
+      results <- rbind(results, data.frame(Year = yr, EndOfSummer = end_date))
+    }
+  }
+  
+  # Day-of-year for plotting
+  results$DayOfYear <- yday(results$EndOfSummer)
+  return(results)
+}
+
+# run function using data
+end_dates <- summer_end(temps_long) 
+
+
+```
+
+## <b style ="color:blue">Results:</b> 
+The results of the ES methods are as follows: 
+1. Single ES: alpha = 0.839, beta = FALSE, gamma = FALSE, with a MSE of 22.85. 
+2. Double ES: alpha = 0.845, beta 0.0037, gamma = FALSE, with a MSE of 23.02. 
+3. Triple ES: alpha = 0.661, beta = 0, gamma = 0.625, with a MSE of 28.35. 
+The lowest MSE is for single ES, meaning it fits the daily average temperature data the best. There was almost no trend with double ES and triple ES shows seasonality but it over fitting led to higher MSE. The results of the single ES (Holt-Winters method) are below. 
+
+```{r ES Results}
+end_dates
+
+ggplot(end_dates, aes(x = Year, y = DayOfYear)) + 
+  geom_point(color = "blue", size = 2) +
+  geom_smooth(method = "lm", se = TRUE, color = "red") +
+  scale_y_continuous(breaks = seq(240, 260, 2)) +
+  labs(
+    title = "Estimated End of Summer over 20 Years - Atlanta",
+    x = "Year", y = "Day of Year (End of Summer)"
+  ) +
+  theme_minimal()
+```
+
+## <b style ="color:blue">Results Discussion:</b>
+Single exponential smoothing was chosen because it had the lowest mean squared error compared to double or triple smoothing methods.  Daily variation in temperatures is noise and does not strongly follow a linear trend or seasonal pattern.  The changepoint detection method applied to smoothed temperatures was effective in identifying the transition to cooler temperatures in the second half of the year to identify the unofficial end of summer. The changepoint detection is a statistical method that identifies points in a time series where the underlying behavior shifts. It looks at the smoothed daily temperatures and finds the day when there is a sudden drop in temperature (unofficial end of summer). Since the data was smoothed, we reduced noise from daily fluctuations which allows this method to be reliable across the years. As observed in the Estimated End of Summer over 20 Years - Atlanta plot, there is a slight delay in the end of summer over the 20 years. One could also apply CUSUM to detect small shifts or trends in the time series by accumulating deviations from the mean. This could help identify whether the observed changes are statistically significant and if summer truly is shifting to later. 
